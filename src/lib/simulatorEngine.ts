@@ -1,12 +1,8 @@
+import { z } from "zod";
+import { readDemoState, writeDemoState } from "./demoState";
 import { updateSpaceOccupancy, resetAllSpacesToBaseline, getRecentSensorEvents, getLiveSpaces } from "./occupancyStore";
 import type { SimulatorScenario, SimulatorStatus, SensorSourceType } from "./types";
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __simulatorInterval: NodeJS.Timeout | null | undefined;
-  // eslint-disable-next-line no-var
-  var __simulatorStatus: SimulatorStatus | undefined;
-}
 
 const SCENARIO_TITLES: Record<SimulatorScenario, string> = {
   normal: "Normal Campus Day",
@@ -17,42 +13,36 @@ const SCENARIO_TITLES: Record<SimulatorScenario, string> = {
   reset: "Reset Campus Baseline",
 };
 
-// Initialize simulator state singleton
-if (!globalThis.__simulatorStatus) {
-  globalThis.__simulatorStatus = {
-    isRunning: false,
-    scenario: "normal",
-    scenarioTitle: SCENARIO_TITLES.normal,
-    frequencySeconds: 3,
-    lastTickAt: null,
-    totalTicks: 0,
-    serverIntervalActive: false,
-    recentEvents: [],
-  };
+const StatusSchema = z.object({
+  isRunning: z.boolean(),
+  scenario: z.enum(["normal", "lunch_rush", "exam_surge", "lab_release", "event_exit", "reset"]),
+  scenarioTitle: z.string(),
+  frequencySeconds: z.number().int().min(2).max(10),
+  lastTickAt: z.string().nullable(),
+  totalTicks: z.number().int().min(0),
+  serverIntervalActive: z.boolean(),
+});
+const INITIAL_STATUS = {
+  isRunning: false, scenario: "normal" as const, scenarioTitle: SCENARIO_TITLES.normal,
+  frequencySeconds: 3, lastTickAt: null, totalTicks: 0, serverIntervalActive: false,
+};
+
+async function saveStatus(status: SimulatorStatus) {
+  const { recentEvents: _events, ...snapshot } = status;
+  await writeDemoState("simulator", snapshot);
 }
 
-/**
- * Returns current state of the sensor simulator engine.
- */
-export function getSimulatorStatus(): SimulatorStatus {
-  const current = globalThis.__simulatorStatus!;
-  return {
-    ...current,
-    serverIntervalActive: Boolean(globalThis.__simulatorInterval),
-    recentEvents: getRecentSensorEvents().slice(0, 20),
-  };
+export async function getSimulatorStatus(): Promise<SimulatorStatus> {
+  const current = await readDemoState("simulator", StatusSchema, INITIAL_STATUS);
+  return { ...current, serverIntervalActive: false, recentEvents: await getRecentSensorEvents() };
 }
 
-/**
- * Executes a single simulation step through the validated occupancy update service.
- * Applies scenario-specific drift, clamps boundaries, and emits normalized sensor telemetry.
- */
 export async function executeSimulationTick(): Promise<{
   success: boolean;
   status: SimulatorStatus;
   eventsCount: number;
 }> {
-  const status = globalThis.__simulatorStatus!;
+  const status = await getSimulatorStatus();
   const scenario = status.scenario;
   const spaces = await getLiveSpaces();
 
@@ -80,7 +70,7 @@ export async function executeSimulationTick(): Promise<{
       }
 
       // 2. Library drops slightly as students leave for food
-      const library = spaces.find((s) => s.id.includes("library"));
+      const library = spaces.find((s) => (s.id.includes("library") || s.name === "Central Library"));
       if (library && library.occupied > Math.round(library.capacity * 0.35)) {
         const delta = -Math.floor(Math.random() * 3 + 1);
         const newOcc = Math.max(Math.round(library.capacity * 0.35), library.occupied + delta);
@@ -99,7 +89,7 @@ export async function executeSimulationTick(): Promise<{
 
     case "exam_surge": {
       // 1. Library surges toward 96%
-      const library = spaces.find((s) => s.id.includes("library"));
+      const library = spaces.find((s) => (s.id.includes("library") || s.name === "Central Library"));
       if (library) {
         const targetOcc = Math.round(library.capacity * 0.96);
         const diff = targetOcc - library.occupied;
@@ -228,87 +218,50 @@ export async function executeSimulationTick(): Promise<{
 
   status.lastTickAt = new Date().toISOString();
   status.totalTicks += 1;
-  status.recentEvents = getRecentSensorEvents().slice(0, 20);
+  status.recentEvents = await getRecentSensorEvents();
+  await saveStatus(status);
 
   return {
     success: true,
-    status: getSimulatorStatus(),
+    status: await getSimulatorStatus(),
     eventsCount: generatedCount,
   };
 }
 
-/**
- * Starts the simulation loop.
- * In a persistent Node runtime, sets a server interval.
- */
-export function startSimulator(scenario?: SimulatorScenario, frequencySeconds = 3): SimulatorStatus {
-  const status = globalThis.__simulatorStatus!;
+
+/** Simulation ticks are requested by the open admin page, never a server timer. */
+export async function startSimulator(scenario?: SimulatorScenario, frequencySeconds = 3): Promise<SimulatorStatus> {
+  const status = await getSimulatorStatus();
   status.isRunning = true;
   if (scenario) {
     status.scenario = scenario;
-    status.scenarioTitle = SCENARIO_TITLES[scenario] || scenario;
+    status.scenarioTitle = SCENARIO_TITLES[scenario];
   }
   status.frequencySeconds = Math.max(2, Math.min(10, frequencySeconds));
-
-  // Clear existing interval if running
-  if (globalThis.__simulatorInterval) {
-    clearInterval(globalThis.__simulatorInterval);
-    globalThis.__simulatorInterval = null;
-  }
-
-  // Set new interval for persistent execution
-  globalThis.__simulatorInterval = setInterval(() => {
-    executeSimulationTick().catch(() => {});
-  }, status.frequencySeconds * 1000);
-
-  status.serverIntervalActive = true;
-  return getSimulatorStatus();
+  await saveStatus(status);
+  return status;
 }
 
-/**
- * Stops the simulation engine.
- */
-export function stopSimulator(): SimulatorStatus {
-  const status = globalThis.__simulatorStatus!;
+export async function stopSimulator(): Promise<SimulatorStatus> {
+  const status = await getSimulatorStatus();
   status.isRunning = false;
-
-  if (globalThis.__simulatorInterval) {
-    clearInterval(globalThis.__simulatorInterval);
-    globalThis.__simulatorInterval = null;
-  }
-
-  status.serverIntervalActive = false;
-  return getSimulatorStatus();
+  await saveStatus(status);
+  return status;
 }
 
-/**
- * Changes active scenario and executes an immediate tick to begin the transition.
- */
 export async function setSimulatorScenario(scenario: SimulatorScenario): Promise<SimulatorStatus> {
-  const status = globalThis.__simulatorStatus!;
+  const status = await getSimulatorStatus();
   status.scenario = scenario;
-  status.scenarioTitle = SCENARIO_TITLES[scenario] || scenario;
-
-  if (scenario === "reset") {
-    await resetAllSpacesToBaseline();
-  } else {
-    // Run an immediate tick to prime the scenario transition
-    await executeSimulationTick();
-  }
-
+  status.scenarioTitle = SCENARIO_TITLES[scenario];
+  await saveStatus(status);
+  if (scenario === "reset") await resetAllSpacesToBaseline();
+  else await executeSimulationTick();
   return getSimulatorStatus();
 }
 
-/**
- * Fully resets simulator state and campus spaces to defaults.
- */
 export async function resetSimulator(): Promise<SimulatorStatus> {
-  stopSimulator();
   await resetAllSpacesToBaseline();
-  const status = globalThis.__simulatorStatus!;
-  status.scenario = "normal";
-  status.scenarioTitle = SCENARIO_TITLES.normal;
-  status.totalTicks = 0;
-  status.lastTickAt = new Date().toISOString();
-  return getSimulatorStatus();
+  const status: SimulatorStatus = { ...INITIAL_STATUS, lastTickAt: new Date().toISOString(), recentEvents: [] };
+  await saveStatus(status);
+  return status;
 }

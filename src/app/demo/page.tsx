@@ -199,14 +199,16 @@ export default function GuidedDemoPage() {
         // Simulate seat freeing in library
         await tick();
         refetchSpaces();
-        createSeatReservation({
+        const hold = createSeatReservation({
           spaceId: "central-library",
           spaceName: "Central Library",
           building: "Library Complex",
           spaceType: "study_space",
           seatId: "DESK-A14",
         });
-        setActionFeedback("Alert threshold set and a 10-minute demo hold created. Occupancy alerts continue while this app session is open.");
+        setActionFeedback(hold
+          ? "Alert set and a 10-minute demo hold created. Open Reservations to check in."
+          : "Alert set. You already have an active seat; manage it in Reservations before creating another hold.");
       } else if (currentStepIndex === 4) {
         // Step 5: What-if Capacity Planner Action
         await applyInsight({
@@ -242,6 +244,8 @@ export default function GuidedDemoPage() {
       setTimerSeconds(0);
       setIsTimerRunning(false);
       setActionFeedback("Demo reset to Step 1 baseline.");
+    } catch (error) {
+      setActionFeedback(error instanceof Error ? error.message : "Could not reset the demo.");
     } finally {
       setIsExecutingAction(false);
     }
@@ -256,7 +260,7 @@ export default function GuidedDemoPage() {
   const totalCapacity = spaces.reduce((acc, s) => acc + s.capacity, 0);
   const totalOccupied = spaces.reduce((acc, s) => acc + s.occupied, 0);
   const avgOccupancy = totalCapacity > 0 ? Math.round((totalOccupied / totalCapacity) * 100) : 58;
-  const crowdedCount = spaces.filter((s) => s.occupancyPercent >= 80).length;
+  const crowdedCount = spaces.filter((s) => s.occupancyPercent >= 75).length;
 
   return (
     <div className="app-layout">

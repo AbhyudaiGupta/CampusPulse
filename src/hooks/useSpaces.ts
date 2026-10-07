@@ -28,6 +28,7 @@ export function useSpaces(): UseSpacesResult {
     try {
       const res = await fetch("/api/spaces");
       const json = await res.json();
+      if (!res.ok || !json.success || !Array.isArray(json.data)) throw new Error("Failed to fetch spaces");
       if (json.success && json.data) {
         // If source is supabase, map to CampusSpace
         if (json.source === "supabase_postgresql") {

@@ -33,7 +33,9 @@ export async function POST(request: Request) {
     const spaces = await getLiveSpaces();
 
     const eligibleSpaces = spaces.filter((space) => {
-      if (space.status === "closed") return false;
+      if (space.status === "closed" || space.availableSeats < 1) return false;
+      if (space.distanceMinutes > criteria.maxWalkMinutes) return false;
+      if (!criteria.facilities.every((facility) => space.facilities.some((item) => item.toLowerCase().includes(facility.toLowerCase())))) return false;
       if (criteria.requireAccessible && !space.accessible) return false;
       if (space.occupancyPercent > criteria.maxOccupancy) return false;
       return criteria.spaceTypes.length === 0 || criteria.spaceTypes.includes(space.type);

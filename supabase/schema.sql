@@ -159,6 +159,12 @@ CREATE POLICY "Users can update their own profile"
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 
+-- Row ownership alone does not prevent a user from promoting their own role.
+-- Grant only the editable profile fields; roles remain an admin SQL operation.
+REVOKE UPDATE ON public.profiles FROM anon, authenticated;
+GRANT UPDATE (full_name, avatar_url, preferred_noise_level, max_walk_minutes,
+              accessibility_required, updated_at) ON public.profiles TO authenticated;
+
 -- 4.2. SPACES & LIVE_OCCUPANCY POLICIES
 -- Public read access so students can query spaces before walking
 CREATE POLICY "Spaces are readable by everyone"

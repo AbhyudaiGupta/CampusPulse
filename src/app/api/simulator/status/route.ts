@@ -16,7 +16,7 @@ export async function GET() {
       );
     }
 
-    const status = getSimulatorStatus();
+    const status = await getSimulatorStatus();
 
     return NextResponse.json({
       success: true,

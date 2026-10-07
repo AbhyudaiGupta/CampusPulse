@@ -81,7 +81,18 @@ export default function RecommendationPage() {
   // Transparent Scoring Engine
   const scoredSpaces = useMemo(() => {
     return spaces
-      .filter((space) => space.status !== "closed" && space.availableSeats > 0)
+      .filter((space) => {
+        const purposeTypes: Record<Purpose, SpaceType[]> = {
+          study: ["study_space", "quiet_room"], coding: ["computer_lab"],
+          group_meeting: ["collaboration"], eat: ["canteen"], attend_event: ["event_space"],
+        };
+        return space.status !== "closed" && space.availableSeats > 0
+          && purposeTypes[form.purpose].includes(space.type)
+          && (!form.requireAccessible || space.accessible)
+          && (!form.needComputer || space.type === "computer_lab")
+          && (!form.needPower || space.facilities.some((facility) => /power/i.test(facility)))
+          && space.distanceMinutes <= form.maxWalkMinutes;
+      })
       .map((space) => {
       let score = 0;
       const reasons: string[] = [];
@@ -96,7 +107,7 @@ export default function RecommendationPage() {
       // 2. Illustrative session outlook (25%)
       const forecastHours = Array.from(
         { length: Math.max(1, Math.ceil(form.durationHours)) },
-        (_, offset) => space.hourlyForecast[(currentHour + offset) % 24]?.predicted
+        (_, offset) => space.hourlyForecast.find((point) => point.hour === (currentHour + offset) % 24)?.predicted
       ).filter((value): value is number => typeof value === "number");
       const avgSessionOccupancy = forecastHours.length
         ? forecastHours.reduce((sum, value) => sum + value, 0) / forecastHours.length
@@ -258,7 +269,7 @@ export default function RecommendationPage() {
                         <button
                           key={p.id}
                           type="button"
-                          onClick={() => setForm((prev) => ({ ...prev, purpose: p.id }))}
+                          onClick={() => setForm((prev) => ({ ...prev, purpose: p.id, needPower: p.id === "study" || p.id === "group_meeting", needComputer: p.id === "coding" }))}
                           className={`p-4 rounded-[6px] border text-left ${
                             isSelected
                               ? "bg-cyan-50/70 border-[var(--color-cyan-500)]"

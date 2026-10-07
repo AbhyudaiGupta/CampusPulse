@@ -48,7 +48,7 @@ export function AdminDigitalTwinMap({
       }
 
       const availableSeats = Math.max(0, s.capacity - projectedOcc);
-      const status = projectedPct > 80 ? "crowded" : projectedPct > 40 ? "moderate" : "quiet";
+      const status = projectedPct >= 75 ? "crowded" : projectedPct >= 40 ? "moderate" : "quiet";
 
       return {
         ...s,

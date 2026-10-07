@@ -7,7 +7,7 @@ The project is a hackathon prototype. Occupancy and forecasts use demo or simula
 ## Run locally
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -43,10 +43,23 @@ Demo actions for a persona persist in that browser and sync between tabs, so a r
 
 ## Data and integrations
 
-Without Supabase configuration, the site uses demo data. Demo reservations, alerts, and preferences are stored in browser local storage. Occupancy changes in the guided admin demo are simulated.
+Without Supabase configuration, the site uses demo data. Demo reservations, alerts, and preferences are stored in browser local storage. Occupancy changes in the guided admin demo are simulated and stored in validated browser-scoped cookies. Keep one admin or guided-demo tab open while running the simulator. Separate browsers have independent simulations.
 
 For Supabase Auth and PostgreSQL setup details, follow [BACKEND_SETUP.md](./BACKEND_SETUP.md). Before using a live deployment, connect reservation actions to the database and verify the campus occupancy source and database policies; demo sensor values should not be presented as actual campus telemetry.
 
 ## Stack
 
-Next.js App Router, React, TypeScript, Tailwind CSS, Supabase (optional), Recharts, Leaflet, and Framer Motion.
+Next.js App Router, React, TypeScript, Tailwind CSS, Supabase (optional), Recharts, an SVG campus map, and Framer Motion.
+
+## Deployment and verification
+
+Use Node.js 24. See [DEPLOYMENT.md](./DEPLOYMENT.md) for GitHub, Vercel, Netlify, and environment setup, and [AUDIT_REPORT.md](./AUDIT_REPORT.md) for verified behavior and remaining integration work.
+
+```bash
+npm run build
+npm run start -- --port 3100
+# In another terminal, with the demo server running:
+npm run test:smoke
+```
+
+The smoke script refuses to mutate a configured Supabase database.

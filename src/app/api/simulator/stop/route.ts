@@ -16,7 +16,7 @@ export async function POST() {
       );
     }
 
-    const status = stopSimulator();
+    const status = await stopSimulator();
 
     return NextResponse.json({
       success: true,

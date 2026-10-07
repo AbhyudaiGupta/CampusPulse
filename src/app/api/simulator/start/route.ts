@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
 
     const { scenario, frequencySeconds } = StartSchema.parse(body);
-    const status = startSimulator(scenario, frequencySeconds);
+    const status = await startSimulator(scenario, frequencySeconds);
 
     return NextResponse.json({
       success: true,

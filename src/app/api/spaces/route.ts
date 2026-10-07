@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isServerSupabaseConfigured } from "@/lib/supabaseServer";
 import { getLiveSpaces } from "@/lib/occupancyStore";
 import { createSafeErrorResponse } from "@/lib/authServer";
 
@@ -12,7 +13,7 @@ export async function GET() {
     const spaces = await getLiveSpaces();
     return NextResponse.json({
       success: true,
-      source: "live_occupancy_service",
+      source: isServerSupabaseConfigured ? "live_occupancy_service" : "mock_demo",
       data: spaces,
     });
   } catch (error) {

@@ -32,9 +32,26 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
+.netlify/
+
+# Local audit output and browser test artifacts
+.audit-*
+test-results/
+playwright-report/
+*.log
+Thumbs.db
+Desktop.ini
+
+# Local editor / agent state (keep project instructions and source)
+.idea/
+.codex/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 
 # typescript
 *.tsbuildinfo

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabaseServer";
-import { MOCK_SPACES } from "@/lib/mockData";
+import { getLiveSpaces } from "@/lib/occupancyStore";
 import { createSafeErrorResponse } from "@/lib/authServer";
 
 /**
@@ -17,7 +17,7 @@ export async function GET(
 
     if (!supabase) {
       // Mock fallback: find by ID or slug
-      const space = MOCK_SPACES.find((s) => s.id === id);
+      const space = (await getLiveSpaces()).find((s) => s.id === id);
       if (!space) {
         return NextResponse.json(
           { success: false, error: "Campus space not found" },

@@ -129,7 +129,7 @@ export function MiniHeatmap({ spaces, className }: MiniHeatmapProps) {
             // Scale mapY slightly to fit 62 height
             const y = (s.coordinates.mapY / 100) * 60 + 2;
             const isHovered = hoveredId === s.id;
-            const isHigh = s.occupancyPercent >= 70;
+            const isHigh = s.occupancyPercent >= 75;
             const isLow = s.occupancyPercent < 40;
             const color = isLow ? "#10b981" : isHigh ? "#ef4444" : "#f59e0b";
 
@@ -139,6 +139,15 @@ export function MiniHeatmap({ spaces, className }: MiniHeatmapProps) {
                 className="cursor-pointer"
                 onMouseEnter={() => setHoveredId(s.id)}
                 onMouseLeave={() => setHoveredId(null)}
+                onFocus={() => setHoveredId(s.id)}
+                onBlur={() => setHoveredId(null)}
+                onClick={() => setHoveredId(s.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setHoveredId(s.id);
+                  }
+                }}
                 tabIndex={0}
                 role="button"
                 aria-label={`${s.name}: ${s.occupancyPercent}% occupied`}

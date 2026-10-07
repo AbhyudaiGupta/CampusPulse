@@ -25,6 +25,8 @@ import {
 import { SPACE_TYPE_LABELS, cn, formatRelativeTime } from "@/lib/utils";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { useApp } from "@/context/AppContext";
+import { useToast } from "@/components/ui/ToastProvider";
 import { ForecastChart } from "@/components/charts/ForecastChart";
 
 interface SpaceDetailDrawerProps {
@@ -38,7 +40,9 @@ export function SpaceDetailDrawer({
   onClose,
   onReserveSuccess,
 }: SpaceDetailDrawerProps) {
-  const [isNotified, setIsNotified] = useState(false);
+  const { activeHold, createSeatReservation, subscribedAlertSpaceIds, subscribeCrowdAlert } = useApp();
+  const { addToast } = useToast();
+  const isNotified = space ? subscribedAlertSpaceIds.includes(space.id) : false;
   const [reserveState, setReserveState] = useState<"idle" | "reserving" | "confirmed">("idle");
 
   if (!space) return null;
@@ -69,16 +73,25 @@ export function SpaceDetailDrawer({
     return null;
   }
 
-  // Simulated reserve action
+  // Use the same hold and notification state as the reservation pages.
   async function handleQuickReserve() {
-    setReserveState("reserving");
-    await new Promise((r) => setTimeout(r, 600));
+    if (!space || space.availableSeats < 1 || space.status === "closed") return;
+    const hold = createSeatReservation({
+      spaceId: space.id, spaceName: space.name, building: space.building,
+      spaceType: space.type, seatId: "NEXT-AVAILABLE",
+    });
+    if (!hold) {
+      addToast({ title: "You already have a seat hold", body: "Manage your current seat in Reservations.", variant: "info" });
+      return;
+    }
     setReserveState("confirmed");
-    if (onReserveSuccess) onReserveSuccess();
+    addToast({ title: "Desk held for 10 minutes", body: "Check in from Reservations before the hold expires.", variant: "success" });
+    onReserveSuccess?.();
   }
 
   // Two-hour forecast slice
-  const twoHourForecast = space.hourlyForecast.slice(12, 17);
+  const currentHour = new Date().getHours();
+  const twoHourForecast = space.hourlyForecast.filter((point) => point.hour >= currentHour && point.hour <= currentHour + 2);
 
   return (
     <AnimatePresence>
@@ -236,9 +249,9 @@ export function SpaceDetailDrawer({
 
         {/* Drawer Footer Actions (Medium-radius rectangular buttons) */}
         <div className="p-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-base)] space-y-2 sticky bottom-0 z-10">
-          {reserveState === "confirmed" ? (
+          {activeHold?.spaceId === space.id && (activeHold.status === "holding" || activeHold.status === "confirmed") ? (
             <div className="p-2.5 rounded-[6px] bg-emerald-100 text-emerald-800 text-[12px] font-semibold text-center border border-emerald-300">
-              Hold confirmed for 15 minutes! Check Reservations tab.
+              Seat held. Manage your 10-minute hold in Reservations.
             </div>
           ) : space.type === "canteen" ? (
             <Link
@@ -251,7 +264,7 @@ export function SpaceDetailDrawer({
             <button
               type="button"
               onClick={handleQuickReserve}
-              disabled={reserveState === "reserving"}
+              disabled={reserveState === "reserving" || space.availableSeats < 1 || space.status === "closed"}
               className="btn btn-primary w-full justify-center text-[13px] py-2.5 font-semibold"
             >
               <BookMarked size={14} />
@@ -269,7 +282,8 @@ export function SpaceDetailDrawer({
 
             <button
               type="button"
-              onClick={() => setIsNotified(!isNotified)}
+              onClick={() => subscribeCrowdAlert(space.id, space.name)}
+              disabled={isNotified}
               className={cn(
                 "btn justify-center text-[12px] py-2 font-medium border",
                 isNotified

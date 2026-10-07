@@ -121,7 +121,7 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppContextProvider({ children }: { children: React.ReactNode }) {
   // 1. User session state
-  const [user, setUser] = useState<UserSession | null>(STUDENT_DEMO_USER);
+  const [user, setUser] = useState<UserSession | null>(isSupabaseConfigured ? null : STUDENT_DEMO_USER);
   const [isSupabaseConnected] = useState<boolean>(isSupabaseConfigured);
 
   // 2. Preferences state
@@ -298,62 +298,40 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return () => window.clearTimeout(timeout);
   }, [activeHold, user?.id]);
 
-  // Real Supabase session synchronization & persistence
+  // Keep profile lookup outside the auth callback's session lock.
   useEffect(() => {
     const client = supabase;
     if (!client) return;
-
     let mounted = true;
-
-    async function checkCurrentSession() {
-      if (!client) return;
-      const { data: { session } } = await client.auth.getSession();
-      if (session?.user && mounted) {
-        // Fetch profile
-        const { data: profile } = await client
-          .from("profiles")
-          .select("full_name, role")
-          .eq("id", session.user.id)
-          .single();
-
-        setUser({
-          id: session.user.id,
-          name: profile?.full_name || session.user.user_metadata?.full_name || "Campus User",
-          email: session.user.email || "",
-          role: (profile?.role as "student" | "admin") || "student",
-          studentId: session.user.id.substring(0, 8).toUpperCase(),
-          department: "Enrolled Student",
-        });
-      }
-    }
-
-    checkCurrentSession();
-
-    // Subscribe to auth state changes
-    const { data: { subscription } } = client.auth.onAuthStateChange(async (event, session) => {
-      if (!client) return;
-      if (session?.user && mounted) {
-        const { data: profile } = await client
-          .from("profiles")
-          .select("full_name, role")
-          .eq("id", session.user.id)
-          .single();
-
-        setUser({
-          id: session.user.id,
-          name: profile?.full_name || session.user.user_metadata?.full_name || "Campus User",
-          email: session.user.email || "",
-          role: (profile?.role as "student" | "admin") || "student",
-          studentId: session.user.id.substring(0, 8).toUpperCase(),
-          department: "Enrolled Student",
-        });
-      } else if (event === "SIGNED_OUT" && mounted) {
+    let revision = 0;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      const currentRevision = ++revision;
+      if (!session?.user) {
         setUser(null);
+        return;
       }
+      const authUser = session.user;
+      setUser({
+        id: authUser.id, name: authUser.user_metadata?.full_name || "Campus User",
+        email: authUser.email || "", role: "student",
+      });
+      const timer = setTimeout(async () => {
+        timers.delete(timer);
+        const { data: profile } = await client.from("profiles")
+          .select("full_name, role").eq("id", authUser.id).single();
+        if (!mounted || currentRevision !== revision) return;
+        setUser({
+          id: authUser.id, name: profile?.full_name || "Campus User",
+          email: authUser.email || "", role: profile?.role === "admin" ? "admin" : "student",
+          studentId: authUser.id.substring(0, 8).toUpperCase(), department: "Enrolled Student",
+        });
+      }, 0);
+      timers.add(timer);
     });
-
     return () => {
       mounted = false;
+      timers.forEach(clearTimeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -365,6 +343,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     let isFetching = false;
 
     async function checkCrowdAlerts() {
+      if (!preferences.crowdAlerts || !preferences.seatDrops || Object.keys(alertThresholds).length === 0) return;
       if (isFetching) return;
       isFetching = true;
 
@@ -418,10 +397,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       active = false;
       clearInterval(interval);
     };
-  }, [alertThresholds, user?.id]);
+  }, [alertThresholds, user?.id, preferences.crowdAlerts, preferences.seatDrops]);
 
   // Auth actions
   function loginAsDemo(role: "student" | "admin") {
+    if (isSupabaseConfigured) return;
     setUser(role === "admin" ? ADMIN_DEMO_USER : STUDENT_DEMO_USER);
   }
 
@@ -510,7 +490,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   }
 
   function confirmCheckIn(holdId: string) {
-    if (activeHold && activeHold.id === holdId) {
+    if (activeHold && activeHold.id === holdId && activeHold.status === "holding") {
       if (Date.now() >= activeHold.expiresAt) {
         setActiveHold((prev) => (prev ? { ...prev, status: "expired" } : null));
         setReservations((prev) =>

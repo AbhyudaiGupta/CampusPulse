@@ -152,7 +152,7 @@ export function SimulationControlDeck({
           {/* Primary Play / Pause Button (Strictly medium-radius rectangle) */}
           <button
             type="button"
-            onClick={handleTogglePlay}
+            onClick={() => void handleTogglePlay().catch(() => {})}
             disabled={isLoading}
             className={`btn text-[13px] py-2 px-4 font-semibold flex items-center gap-2 rounded-[8px] ${
               isRunning
@@ -190,7 +190,7 @@ export function SimulationControlDeck({
               <button
                 key={f.val}
                 type="button"
-                onClick={() => handleFrequencyChange(f.val)}
+                onClick={() => void handleFrequencyChange(f.val).catch(() => {})}
                 className={`p-2 rounded-[8px] border text-left ${
                   selectedFreq === f.val
                     ? "bg-[var(--color-navy-950)] text-white border-[var(--color-navy-950)]"
@@ -219,7 +219,7 @@ export function SimulationControlDeck({
             </span>
             <button
               type="button"
-              onClick={onTick}
+              onClick={() => void onTick().catch(() => {})}
               disabled={isLoading}
               className="btn btn-secondary text-[12px] py-2 px-3.5 font-semibold flex items-center gap-2 rounded-[8px]"
               title="Executes one immediate anonymous sensor tick"
@@ -271,7 +271,7 @@ export function SimulationControlDeck({
             <strong className="text-slate-900 font-semibold block mb-0.5">
               Reliable Demonstration Timing Note:
             </strong>
-            When running in a persistent Node runtime (local dev or container), the background server-side interval fires automatically at your selected frequency. If deploying to serverless environments where persistent background timers are suspended between requests, the <strong>“Run 1 Simulation Tick”</strong> control provides an immediate, 100% reliable deterministic fallback for live hackathon judging.
+            Keep this page open to advance the simulation at your selected frequency. Demo values persist in this browser and are shared with its other tabs. Use <strong>“Run 1 Simulation Tick”</strong> to advance a scenario manually. Separate browsers have independent demos.
           </div>
         </div>
       )}
@@ -296,7 +296,7 @@ export function SimulationControlDeck({
               <button
                 key={sc.id}
                 type="button"
-                onClick={() => onScenarioChange(sc.id)}
+                onClick={() => void onScenarioChange(sc.id).catch(() => {})}
                 className={`p-3.5 rounded-[6px] border text-left flex flex-col justify-between ${
                   isSelected
                     ? "bg-[var(--color-navy-950)] text-white border-[var(--color-navy-950)] ring-1 ring-cyan-500/20"
@@ -355,7 +355,7 @@ export function SimulationControlDeck({
         onClose={() => setShowResetModal(false)}
         onConfirm={async () => {
           setShowResetModal(false);
-          await onReset();
+          await onReset().catch(() => {});
         }}
         isLoading={isLoading}
       />

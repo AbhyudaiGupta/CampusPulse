@@ -126,7 +126,10 @@ export function createSafeErrorResponse(error: unknown, defaultMessage = "Intern
     );
   }
 
-  const message = error instanceof Error ? error.message : defaultMessage;
+  if (error instanceof SyntaxError) {
+    return NextResponse.json({ success: false, error: "Invalid JSON request body" }, { status: 400 });
+  }
+  const message = defaultMessage;
   return NextResponse.json(
     {
       success: false,

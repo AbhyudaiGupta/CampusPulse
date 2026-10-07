@@ -26,12 +26,12 @@ function projectedOccupancy(space: CampusSpace | undefined, currentHour: number,
   if (!space || offsetHours === 0) return space?.occupancyPercent ?? 0;
 
   const forecasts = space.hourlyForecast;
-  const baselineNow = forecasts[currentHour]?.predicted ?? space.occupancyPercent;
+  const baselineNow = forecasts.find((point) => point.hour === currentHour)?.predicted ?? space.occupancyPercent;
   const targetHour = currentHour + offsetHours;
   const lowerHour = Math.floor(targetHour) % 24;
   const fraction = targetHour - Math.floor(targetHour);
-  const lower = forecasts[lowerHour]?.predicted ?? baselineNow;
-  const upper = forecasts[(lowerHour + 1) % 24]?.predicted ?? lower;
+  const lower = forecasts.find((point) => point.hour === lowerHour)?.predicted ?? baselineNow;
+  const upper = forecasts.find((point) => point.hour === (lowerHour + 1) % 24)?.predicted ?? lower;
   const projected = space.occupancyPercent + lower + (upper - lower) * fraction - baselineNow;
 
   return Math.max(0, Math.min(100, Math.round(projected)));

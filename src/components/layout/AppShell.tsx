@@ -322,7 +322,7 @@ export function TopNav({
                 const Icon = item.icon;
                 const badgeCount = item.href === "/notifications"
                   ? app.unreadCount
-                  : "badge" in item
+                  : "badge" in item && typeof item.badge === "number"
                     ? item.badge
                     : 0;
                 return (

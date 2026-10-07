@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { readDemoState, writeDemoState } from "./demoState";
+import { getStatusFromPercent } from "./utils";
 import { MOCK_SPACES } from "./mockData";
 import { createServerSupabaseClient, getServiceRoleClient } from "./supabaseServer";
 import type {
@@ -8,20 +11,20 @@ import type {
   SimulatedSensorEvent,
 } from "./types";
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __liveCampusSpaces: CampusSpace[] | undefined;
-  // eslint-disable-next-line no-var
-  var __sensorEventsStream: SimulatedSensorEvent[] | undefined;
-}
-
-// Initialize server memory singleton
-if (!globalThis.__liveCampusSpaces) {
-  globalThis.__liveCampusSpaces = JSON.parse(JSON.stringify(MOCK_SPACES));
-}
-if (!globalThis.__sensorEventsStream) {
-  globalThis.__sensorEventsStream = [];
-}
+const DemoOccupancySchema = z.record(z.string(), z.object({
+  occupied: z.number().int().min(0).max(10000),
+  queueCount: z.number().int().min(0).max(10000),
+  noiseLevel: z.enum(["silent", "quiet", "moderate", "loud"]),
+  lastUpdated: z.string(),
+}));
+const EventSchema = z.array(z.object({
+  id: z.string(), spaceId: z.string(), spaceName: z.string(),
+  source: z.enum(["door_counter", "desk_sensor", "lab_aggregate", "queue_counter"]),
+  sourceLabel: z.string(), eventType: z.string(), delta: z.number(),
+  newOccupancy: z.number(), capacity: z.number(), occupancyPercent: z.number(),
+  noiseLevel: z.enum(["silent", "quiet", "moderate", "loud"]),
+  queueCount: z.number(), timestamp: z.string(),
+})).max(4);
 
 const SOURCE_LABELS: Record<SensorSourceType, string> = {
   door_counter: "Door Counter (Optical Break-Beam)",
@@ -41,7 +44,7 @@ export interface UpdateOccupancyParams {
 }
 
 /**
- * Returns current campus spaces from server memory (or Supabase if connected).
+ * Returns browser-scoped simulated occupancy or configured Supabase data.
  */
 export async function getLiveSpaces(): Promise<CampusSpace[]> {
   const supabase = await createServerSupabaseClient();
@@ -51,9 +54,10 @@ export async function getLiveSpaces(): Promise<CampusSpace[]> {
       .select("*, live_occupancy (*)")
       .order("name", { ascending: true });
 
-    if (!error && data && data.length > 0) {
+    if (error) throw new Error("Unable to load campus occupancy");
+    if (data) {
       return data.map((s: any) => {
-        const occ = Array.isArray(s.live_occupancy) ? s.live_occupancy[0] : s.live_occupancy || {};
+        const occ = Array.isArray(s.live_occupancy) ? s.live_occupancy[0] ?? {} : s.live_occupancy || {};
         const capacity = s.capacity || 100;
         const occupied = occ.occupied || 0;
         const availableSeats = Math.max(0, capacity - occupied);
@@ -70,7 +74,7 @@ export async function getLiveSpaces(): Promise<CampusSpace[]> {
           occupied,
           availableSeats,
           occupancyPercent,
-          status: occ.status || (occupancyPercent > 80 ? "crowded" : occupancyPercent > 40 ? "moderate" : "quiet"),
+          status: occ.status === "closed" ? "closed" : getStatusFromPercent(occupancyPercent),
           noiseLevel: occ.noise_level || "moderate",
           estimatedWaitMinutes: occ.queue_count ? Math.round(occ.queue_count * 1.5) : 0,
           distanceMinutes: mockMatch?.distanceMinutes ?? 5,
@@ -91,8 +95,16 @@ export async function getLiveSpaces(): Promise<CampusSpace[]> {
     }
   }
 
-  // Fallback to server in-memory store
-  return globalThis.__liveCampusSpaces ?? MOCK_SPACES;
+  const snapshot = await readDemoState("occupancy", DemoOccupancySchema, {});
+  return MOCK_SPACES.map((space) => {
+    const saved = snapshot[space.id];
+    if (!saved) return { ...space, status: getStatusFromPercent(space.occupancyPercent) };
+    const occupied = Math.min(space.capacity, saved.occupied);
+    const occupancyPercent = Math.round(occupied / space.capacity * 100);
+    return { ...space, occupied, occupancyPercent, availableSeats: space.capacity - occupied,
+      status: getStatusFromPercent(occupancyPercent), noiseLevel: saved.noiseLevel,
+      estimatedWaitMinutes: Math.round(saved.queueCount * 1.5), lastUpdated: saved.lastUpdated };
+  });
 }
 
 /**
@@ -102,7 +114,7 @@ export async function getLiveSpaces(): Promise<CampusSpace[]> {
 export async function updateSpaceOccupancy(
   params: UpdateOccupancyParams
 ): Promise<{ success: boolean; space: CampusSpace; event: SimulatedSensorEvent }> {
-  const spaces = globalThis.__liveCampusSpaces ?? MOCK_SPACES;
+  const spaces = await getLiveSpaces();
   const targetIndex = spaces.findIndex((s) => s.id === params.spaceId);
 
   if (targetIndex === -1) {
@@ -116,7 +128,7 @@ export async function updateSpaceOccupancy(
   const availableSeats = Math.max(0, capacity - boundedOccupied);
   const occupancyPercent = Math.round((boundedOccupied / capacity) * 100);
   const status: OccupancyStatus =
-    occupancyPercent > 80 ? "crowded" : occupancyPercent > 40 ? "moderate" : "quiet";
+    getStatusFromPercent(occupancyPercent);
   const noiseLevel: NoiseLevel =
     params.noiseLevel ??
     (occupancyPercent > 85 ? "loud" : occupancyPercent > 50 ? "moderate" : "quiet");
@@ -127,7 +139,7 @@ export async function updateSpaceOccupancy(
   const prevOccupied = currentSpace.occupied;
   const delta = params.delta ?? boundedOccupied - prevOccupied;
 
-  // Update in-memory record
+  // Derive the updated record.
   const updatedSpace: CampusSpace = {
     ...currentSpace,
     occupied: boundedOccupied,
@@ -138,8 +150,7 @@ export async function updateSpaceOccupancy(
     estimatedWaitMinutes,
     lastUpdated: nowIso,
   };
-  spaces[targetIndex] = updatedSpace;
-  globalThis.__liveCampusSpaces = spaces;
+
 
   // Create normalized simulated sensor event
   const sourceType = params.source || "door_counter";
@@ -159,12 +170,8 @@ export async function updateSpaceOccupancy(
     timestamp: nowIso,
   };
 
-  // Push to recent events stream (max 40)
-  if (!globalThis.__sensorEventsStream) globalThis.__sensorEventsStream = [];
-  globalThis.__sensorEventsStream.unshift(sensorEvent);
-  if (globalThis.__sensorEventsStream.length > 40) {
-    globalThis.__sensorEventsStream = globalThis.__sensorEventsStream.slice(0, 40);
-  }
+  const recentEvents = await getRecentSensorEvents();
+  await writeDemoState("events", [sensorEvent, ...recentEvents].slice(0, 4));
 
   // If Supabase is connected, persist to live_occupancy & sensor_events
   try {
@@ -173,7 +180,7 @@ export async function updateSpaceOccupancy(
     const clientToUse = serviceClient || serverClient;
 
     if (clientToUse) {
-      await clientToUse.from("live_occupancy").upsert({
+      const { error: occupancyError } = await clientToUse.from("live_occupancy").upsert({
         space_id: updatedSpace.id,
         occupied: boundedOccupied,
         available: availableSeats,
@@ -183,77 +190,44 @@ export async function updateSpaceOccupancy(
         updated_at: nowIso,
       });
 
-      await clientToUse.from("sensor_events").insert({
+      if (occupancyError) throw new Error("Could not save occupancy");
+      const { error: eventError } = await clientToUse.from("sensor_events").insert({
         space_id: updatedSpace.id,
         source: `simulated_${sourceType}`,
         event_type: sensorEvent.eventType,
         occupancy_count: boundedOccupied,
         recorded_at: nowIso,
       });
+      if (eventError) throw new Error("Could not save sensor event");
+    } else {
+      const snapshot = await readDemoState("occupancy", DemoOccupancySchema, {});
+      snapshot[updatedSpace.id] = { occupied: boundedOccupied, queueCount, noiseLevel, lastUpdated: nowIso };
+      await writeDemoState("occupancy", snapshot);
     }
   } catch (err) {
-    // Non-fatal if Supabase is unavailable in mock demo
+    throw err;
   }
 
   return { success: true, space: updatedSpace, event: sensorEvent };
 }
 
 /**
- * Resets all spaces in server memory to initial default baseline.
+ * Resets the current demo or configured database to the sample baseline.
  */
 export async function resetAllSpacesToBaseline(): Promise<CampusSpace[]> {
-  const fresh = JSON.parse(JSON.stringify(MOCK_SPACES));
-  globalThis.__liveCampusSpaces = fresh;
-
-  // Log a reset sensor event
-  const resetEvent: SimulatedSensorEvent = {
-    id: `ev-${Date.now()}-reset`,
-    spaceId: "campus-wide",
-    spaceName: "Campus Wide Baseline",
-    source: "door_counter",
-    sourceLabel: "System Baseline Calibrator",
-    eventType: "baseline_reset",
-    delta: 0,
-    newOccupancy: 0,
-    capacity: 0,
-    occupancyPercent: 0,
-    noiseLevel: "quiet",
-    queueCount: 0,
-    timestamp: new Date().toISOString(),
-  };
-
-  if (!globalThis.__sensorEventsStream) globalThis.__sensorEventsStream = [];
-  globalThis.__sensorEventsStream.unshift(resetEvent);
-
-  // If Supabase is connected, update all live_occupancy rows
-  try {
-    const serviceClient = getServiceRoleClient();
-    const serverClient = await createServerSupabaseClient();
-    const clientToUse = serviceClient || serverClient;
-
-    if (clientToUse) {
-      for (const space of fresh) {
-        await clientToUse.from("live_occupancy").upsert({
-          space_id: space.id,
-          occupied: space.occupied,
-          available: space.availableSeats,
-          queue_count: 0,
-          noise_level: space.noiseLevel,
-          status: space.status,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    }
-  } catch {
-    // Ignore in demo
+  const current = await getLiveSpaces();
+  for (const space of current) {
+    const baseline = MOCK_SPACES.find((item) => item.name === space.name);
+    if (baseline) await updateSpaceOccupancy({
+      spaceId: space.id, occupied: baseline.occupied,
+      queueCount: Math.round(baseline.estimatedWaitMinutes / 1.5),
+      noiseLevel: baseline.noiseLevel, eventType: "baseline_reset",
+    });
   }
-
-  return fresh;
+  await writeDemoState("events", []);
+  return getLiveSpaces();
 }
 
-/**
- * Returns latest simulated sensor events from the in-memory stream.
- */
-export function getRecentSensorEvents(): SimulatedSensorEvent[] {
-  return globalThis.__sensorEventsStream || [];
+export async function getRecentSensorEvents(): Promise<SimulatedSensorEvent[]> {
+  return readDemoState("events", EventSchema, []);
 }

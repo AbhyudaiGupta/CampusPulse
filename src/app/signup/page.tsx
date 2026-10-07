@@ -62,10 +62,8 @@ export default function SignupPage() {
       return;
     }
 
-    // Demo fallback when Supabase is not configured
-    await new Promise((r) => setTimeout(r, 900));
     setLoading(false);
-    setDone(true);
+    setError("Account creation is unavailable in demo mode. Use Student Demo on the sign-in page.");
   }
 
   return (

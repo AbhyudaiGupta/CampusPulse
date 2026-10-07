@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useToast } from "@/components/ui/ToastProvider";
 import type { SimulatorScenario, SimulatorStatus, OperationalInsight } from "@/lib/types";
 
 const INITIAL_STATUS: SimulatorStatus = {
@@ -15,6 +16,9 @@ const INITIAL_STATUS: SimulatorStatus = {
 };
 
 export function useSimulator(onTelemetryTick?: () => void) {
+  const { addToast } = useToast();
+  const telemetryCallback = useRef(onTelemetryTick);
+  useEffect(() => { telemetryCallback.current = onTelemetryTick; }, [onTelemetryTick]);
   const [status, setStatus] = useState<SimulatorStatus>(INITIAL_STATUS);
   const [insights, setInsights] = useState<OperationalInsight[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -32,6 +36,17 @@ export function useSimulator(onTelemetryTick?: () => void) {
     }, 1200);
   }, []);
 
+  // Surface failed actions instead of displaying a false success.
+  const readAction = useCallback(async (response: Response) => {
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      const message = json.error || "Simulation action failed. Please try again.";
+      addToast({ title: "Action failed", body: message, variant: "error" });
+      throw new Error(message);
+    }
+    return json;
+  }, [addToast]);
+
   // Fetch status
   const fetchStatus = useCallback(async () => {
     try {
@@ -42,13 +57,13 @@ export function useSimulator(onTelemetryTick?: () => void) {
         if (json.status.totalTicks !== prevTicksRef.current) {
           prevTicksRef.current = json.status.totalTicks;
           triggerPulse();
-          onTelemetryTick?.();
+          telemetryCallback.current?.();
         }
       }
     } catch {
       // Ignore in background
     }
-  }, [triggerPulse, onTelemetryTick]);
+  }, [triggerPulse]);
 
   // Fetch insights
   const fetchInsights = useCallback(async () => {
@@ -85,31 +100,31 @@ export function useSimulator(onTelemetryTick?: () => void) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scenario, frequencySeconds: freq }),
       });
-      const json = await res.json();
+      const json = await readAction(res);
       if (json.success && json.status) {
         setStatus(json.status);
         triggerPulse();
-        onTelemetryTick?.();
+        telemetryCallback.current?.();
       }
     } finally {
       setIsLoading(false);
       fetchInsights();
     }
-  }, [triggerPulse, onTelemetryTick, fetchInsights]);
+  }, [triggerPulse, fetchInsights, readAction]);
 
   // Stop
   const stop = useCallback(async () => {
     try {
       setIsLoading(true);
       const res = await fetch("/api/simulator/stop", { method: "POST" });
-      const json = await res.json();
+      const json = await readAction(res);
       if (json.success && json.status) {
         setStatus(json.status);
       }
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [readAction]);
 
   // Switch scenario
   const setScenario = useCallback(async (scenario: SimulatorScenario) => {
@@ -120,51 +135,80 @@ export function useSimulator(onTelemetryTick?: () => void) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scenario }),
       });
-      const json = await res.json();
+      const json = await readAction(res);
       if (json.success && json.status) {
         setStatus(json.status);
         triggerPulse();
-        onTelemetryTick?.();
+        telemetryCallback.current?.();
       }
     } finally {
       setIsLoading(false);
       fetchInsights();
     }
-  }, [triggerPulse, onTelemetryTick, fetchInsights]);
+  }, [triggerPulse, fetchInsights, readAction]);
 
   // Reset
   const reset = useCallback(async () => {
     try {
       setIsLoading(true);
       const res = await fetch("/api/simulator/reset", { method: "POST" });
-      const json = await res.json();
+      const json = await readAction(res);
       if (json.success && json.status) {
         setStatus(json.status);
         triggerPulse();
-        onTelemetryTick?.();
+        telemetryCallback.current?.();
       }
     } finally {
       setIsLoading(false);
       fetchInsights();
     }
-  }, [triggerPulse, onTelemetryTick, fetchInsights]);
+  }, [triggerPulse, fetchInsights, readAction]);
 
   // Execute 1 tick manually
   const tick = useCallback(async () => {
     try {
       setIsLoading(true);
       const res = await fetch("/api/simulator/tick", { method: "POST" });
-      const json = await res.json();
+      const json = await readAction(res);
       if (json.success && json.status) {
         setStatus(json.status);
         triggerPulse();
-        onTelemetryTick?.();
+        telemetryCallback.current?.();
       }
     } finally {
       setIsLoading(false);
       fetchInsights();
     }
-  }, [triggerPulse, onTelemetryTick, fetchInsights]);
+  }, [triggerPulse, fetchInsights, readAction]);
+
+  // Serverless hosts stop work after a response. The open admin page drives
+  // sequential ticks; status and occupancy persist in browser-scoped cookies.
+  useEffect(() => {
+    if (!status.isRunning || isLoading) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function advance() {
+      try {
+        const response = await fetch("/api/simulator/tick", { method: "POST" });
+        const json = await response.json();
+        if (!cancelled && response.ok && json.success) {
+          setStatus(json.status);
+          telemetryCallback.current?.();
+          void fetchInsights();
+        }
+      } catch {
+        // Keep the last result; the next scheduled request retries.
+      } finally {
+        if (!cancelled) timer = setTimeout(advance, status.frequencySeconds * 1000);
+      }
+    }
+    timer = setTimeout(advance, status.frequencySeconds * 1000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [status.isRunning, status.frequencySeconds, isLoading, fetchInsights]);
+
+  useEffect(() => () => {
+    if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current);
+  }, []);
 
   // Apply insight recommendation
   const applyInsight = useCallback(async (

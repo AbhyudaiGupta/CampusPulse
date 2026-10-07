@@ -71,9 +71,9 @@ export async function PATCH(
     }
 
     // 4. Expiration check
-    if (reservation.status === "cancelled") {
+    if (reservation.status !== "holding") {
       return NextResponse.json(
-        { success: false, error: "This reservation was already cancelled." },
+        { success: false, error: "Only an active seat hold can be checked in." },
         { status: 400 }
       );
     }
@@ -100,6 +100,8 @@ export async function PATCH(
         checked_in_at: nowIso,
       })
       .eq("id", id)
+      .eq("status", "holding")
+      .gt("expires_at", nowIso)
       .select()
       .single();
 

@@ -364,6 +364,12 @@ export function CampusDigitalTwin({
               key={space.id}
               transform={`translate(${coords.x}, ${coords.y})`}
               onClick={() => onSelectSpace(space.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelectSpace(space.id);
+                }
+              }}
               onMouseEnter={() => setHoveredId(space.id)}
               onMouseLeave={() => setHoveredId(null)}
               className="cursor-pointer group"

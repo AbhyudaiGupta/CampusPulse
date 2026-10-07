@@ -121,6 +121,7 @@ export function LiveResourceCard({ space, index = 0 }: LiveResourceCardProps) {
         {/* Animated Bar */}
         <div className="h-2 w-full bg-[var(--color-surface-muted)] rounded-[4px] overflow-hidden">
           <motion.div
+            style={{ width: `${space.occupancyPercent}%` }}
             className={`h-full rounded-[4px] ${
               space.status === "quiet"
                 ? "bg-emerald-500"

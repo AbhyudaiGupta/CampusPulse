@@ -24,7 +24,7 @@ export function MetricOverview({ spaces, reservations }: MetricOverviewProps) {
   const capacity = openSpaces.reduce((total, space) => total + space.capacity, 0);
   const occupied = openSpaces.reduce((total, space) => total + space.occupied, 0);
   const availableSeats = Math.max(0, capacity - occupied);
-  const crowdedSpaces = openSpaces.filter((space) => space.occupancyPercent >= 80);
+  const crowdedSpaces = openSpaces.filter((space) => space.occupancyPercent >= 75);
   const upcomingReservations = reservations.filter(
     (reservation) => reservation.status === "upcoming" || reservation.status === "active"
   );
@@ -47,7 +47,7 @@ export function MetricOverview({ spaces, reservations }: MetricOverviewProps) {
     {
       label: "Crowded zones",
       value: crowdedSpaces.length,
-      sublabel: crowdedNames || "No spaces above 80% occupancy",
+      sublabel: crowdedNames || "No spaces at or above 75% occupancy",
       badge: crowdedSpaces.length ? "Review these spaces" : "No zone needs attention",
       badgeType: crowdedSpaces.length ? "warning" : "positive",
       icon: AlertTriangle,

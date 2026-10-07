@@ -23,7 +23,7 @@ export default function ForgotPasswordPage() {
 
     if (supabase) {
       const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?next=/profile`,
+        redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
       });
 
       if (resetErr) {
@@ -37,10 +37,8 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    // Demo fallback when Supabase is not configured
-    await new Promise((r) => setTimeout(r, 800));
     setLoading(false);
-    setDone(true);
+    setError("Email recovery is unavailable in demo mode. Use the demo sign-in buttons instead.");
   }
 
   return (
